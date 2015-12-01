@@ -8,7 +8,7 @@ import sys
 
 from distutils.core import setup
 from distutils.extension import Extension
-import models.deeprnn
+#import models.deeprnn
 
 if USE_CYTHON:
     try:
@@ -29,7 +29,7 @@ if USE_CYTHON:
 
 setup(
     name='DerpRNN',
-    version=models.deeprnn.__version__,
+    #version=models.deeprnn.__version__,
     description='Deep RNN models.',
     author='Heikki Arponen',
     author_email='heikki@quantmechanics.com',
