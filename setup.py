@@ -2,7 +2,7 @@ __author__ = 'Heikki Arponen'
 
 # Set USE_CYTHON to True to build extensions using Cython.
 # Set it to False to use the C file
-USE_CYTHON = False
+USE_CYTHON = True
 
 import sys
 
