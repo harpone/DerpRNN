@@ -40,7 +40,7 @@ setup(
     #long_description=open('README.txt').read(),
 
     license="GPLv3",
-    install_requires=['numpy>=1.10.1,'
+    install_requires=['numpy>=1.10.1',
                       'theano>=0.7.0',
                       'python-midi'],
     classifiers=[
