@@ -1,0 +1,25 @@
+Some optimized parameters and corresponding samples.
+
+---------------------------------------------
+selected_noninvariant_5_5_m0.057:
+	depth=5,
+	width=5,
+	readout_width=1,
+	readin_layer='tanh',
+	rnn_layer='gru',
+	readout_layer='rbm',
+	optimizer='adadelta',
+	sparsity=.5,
+	readin_input_scale=2.,
+	recurrence_spectral_radius=1.5,
+	recurrence_input_scale=2.,
+	readout_scale=7.,
+	dropout=0.,
+	input_dropout=0.,
+	input_noise=0.005
+
+Best monitor achieved = 0.057.
+Monitor only increases after this!!
+
+
+---------------------------------------------
