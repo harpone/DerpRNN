@@ -414,6 +414,7 @@ class DeepRNN(object):
             try:
                 set_loaded_parameters(self.filename, gtm1 + stm1)
             except:
+                print('Failed to load parameters... creating new file.')
                 pass
 
         # for storing the full state of optimizer:

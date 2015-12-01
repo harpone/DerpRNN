@@ -40,7 +40,7 @@ setup(
     #long_description=open('README.txt').read(),
 
     license="GPLv3",
-    install_requires=['theano, python-midi'],
+    install_requires=['theano', 'python-midi'],
     classifiers=[
         'Programming Language :: Python',
         'Programming Language :: Python :: 2.7',
