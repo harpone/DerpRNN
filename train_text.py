@@ -88,9 +88,9 @@ model = DeepRNN(depth=5,
 
 # Phase 3
 model.train(dataset,
-            lr=1.,                     # .1 or 1. !!!
-            min_batch_size=100,
+            lr=.1,                     # .1 or 1. !!!
+            min_batch_size=200,
             max_batch_size=200,
             num_epochs=100,
             save_as=state,
-            gamma=.95)                 # .9 or .99 !!!
+            gamma=.99)                 # .9 or .99 !!!
