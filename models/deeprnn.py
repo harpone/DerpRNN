@@ -46,7 +46,7 @@ min_steps_in_batch = 3  # require this many nonzero notes in batch
 #TODO: double relu as tanh replacement?
 tanh = T.tanh
 sigmoid = T.nnet.hard_sigmoid
-relu = T.nnet.relu
+#relu = T.nnet.relu
 
 class DeepRNN(object):
 
