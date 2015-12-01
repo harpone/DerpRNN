@@ -337,39 +337,6 @@ def process_dataset(path, outname=None, verbose=False, min_length=100):
     return dataset
 
 
-def process_dataset_old(path, outname=None, noterange=(21, 109), dt=0.3):
-    """Loads bunch of MIDI files, converts them to piano roll
-    and outs a list of those.
-
-    :param path:
-    :param noterange: range of notes used
-    :param dt: float
-            Sampling period when converting the MIDI files into piano-rolls, or
-            equivalently the time difference between consecutive time steps.
-    :return: list
-    """
-    files = os.listdir(path)
-
-    assert len(files) > 0, 'No data!'
-
-    dataset = []
-
-    for f in files:
-        try:
-            piano_roll = midiread(path + f, noterange,
-                        dt).piano_roll.astype(theano.config.floatX)
-            dataset.append(piano_roll)
-        except IOError:
-            print('fuck')
-            pass
-
-    if outname is not None:
-        np.savez(outname, dataset)
-        print('File saved as {}.npz'.format(outname))
-
-    return dataset
-
-
 def roll_and_dot(wvec, xvec):
     """
     wvec.shape = (n_in, )
