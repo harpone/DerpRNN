@@ -8,7 +8,10 @@ import time
 import matplotlib.pyplot as plt
 from collections import OrderedDict
 from random import shuffle
-from theano.misc.pkl_utils import dump
+try:
+    from theano.misc.pkl_utils import dump
+except ImportError:
+    dump = theano.misc.pkl_utils.Pickler.dump
 import cPickle
 
 
