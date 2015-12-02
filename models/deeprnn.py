@@ -8,6 +8,7 @@ import time
 import matplotlib.pyplot as plt
 from collections import OrderedDict
 from random import shuffle
+from theano.misc.pkl_utils import dump
 import cPickle
 
 
@@ -596,9 +597,14 @@ class DeepRNN(object):
 
                     saved_state = self.parameters + self.gtm1 + self.stm1
 
-                    savefile = file(save_as + '.save', mode='wb')
-                    cPickle.dump(saved_state, savefile)
-                    savefile.close()
+                    with open(save_as + '.zip', 'w') as f:
+                        dump(saved_state, f)
+
+                    # savefile = file(save_as + '.save', mode='wb')
+                    # cPickle.dump(saved_state, savefile)
+                    # savefile.close()
+
+
 
 
         except KeyboardInterrupt:

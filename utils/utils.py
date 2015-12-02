@@ -20,7 +20,7 @@ from theano.tensor.signal.conv import conv2d as conv_signal
 convolution = conv_signal
 
 
-def set_loaded_parameters(filename, params):
+def set_loaded_parameters_old(filename, params):
     file_ = file(filename + '.save', 'rb')
     loaded_params = cPickle.load(file_)
     file_.close()
@@ -29,6 +29,15 @@ def set_loaded_parameters(filename, params):
         for loaded_param in loaded_params:
             if param.name == loaded_param.name:
                 param.set_value(loaded_param.get_value())
+                break
+
+def set_loaded_parameters(filename, params):
+    loaded_params = np.load(filename + '.zip')
+
+    for param in params:
+        for loaded_param_name in loaded_params.keys()[:-1]:  # no 'pkl'
+            if param.name == loaded_param_name:
+                param.set_value(loaded_params[loaded_param_name])
                 break
 
 
