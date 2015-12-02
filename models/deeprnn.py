@@ -8,12 +8,6 @@ import time
 import matplotlib.pyplot as plt
 from collections import OrderedDict
 from random import shuffle
-try:
-    from theano.misc.pkl_utils import dump
-except ImportError:
-    dump = theano.misc.pkl_utils.Pickler.dump
-import cPickle
-
 
 import theano
 from theano import tensor as T
@@ -21,6 +15,12 @@ from theano.tensor.signal.conv import conv2d as conv_signal
 #from theano.tensor.shared_randomstreams import RandomStreams
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 from theano.compile.debugmode import DebugMode
+
+try:
+    from theano.misc.pkl_utils import dump
+except ImportError:
+    dump = theano.misc.pkl_utils.Pickler.dump
+import cPickle
 
 # Local imports:
 from utils.utils import *
