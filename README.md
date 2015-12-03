@@ -12,6 +12,7 @@ This is a smallish Python module for deep recurrent neural networks using **Thea
 - There's also a fully translation invariant version (`InvariantDeepRNN`, but it's not quite done yet...)
 
 **Please see the "Demo notebook" for example usage!**
+https://github.com/harpone/DerpRNN/blob/master/Demo%20notebook.ipynb
 
 Requirements are the usual scientific python ones, plus of course **Theano**. Also `python-midi` is needed for processing the midi data. You may also need need **cython**.
 
