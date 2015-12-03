@@ -53,7 +53,7 @@ text_file = open("nietzsche_recon.txt", "w")
 text_file.write(text_recon)
 text_file.close()
 
-
+load_state = 'saved_model_parameters/text_5_10_m0.016'
 state = 'text_5_10_new'
 n_visible = dataset.shape[1]
 
@@ -65,7 +65,7 @@ model = DeepRNN(depth=5,
                  readout_layer='softmax',
                  n_visible=n_visible,
                  optimizer='adadelta',
-                 state_from_file=state,
+                 state_from_file=load_state,
                  sparsity=1.,
                  readin_input_scale=2.,
                  recurrence_spectral_radius=1.2,

@@ -232,7 +232,7 @@ def midiToNoteStateMatrix(midifile, lowerbound=21, upperbound=109):
                 elif isinstance(evt, midi.TimeSignatureEvent):
                     if evt.numerator not in (2, 4):
                         # We don't want to worry about non-4 time signatures. Bail early!
-                        print("Found non even time signature event. Bailing early!".format(evt))
+                        #print("Found non even time signature event. Bailing early!".format(evt))
                         return statematrix
 
 
