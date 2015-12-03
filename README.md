@@ -11,12 +11,13 @@ This is a smallish Python module for deep recurrent neural networks using **Thea
 - Readout layer can be `RBM`, `tanh`, `sigmoid` or `softmax`
 - There's also a fully translation invariant version (`InvariantDeepRNN`, but it's not quite done yet...)
 
+**Please see the "Demo notebook" for example usage!**
+
 Requirements are the usual scientific python ones, plus of course **Theano**. Also `python-midi` is needed for processing the midi data. You may also need need **cython**.
 
-There's a seup script, so you *should* be able to install the module and the dependencies by
+There's a seup script, so you *should* be able to install the module and the dependencies by `pip install git+https://github.com/harpone/DerpRNN`.
 
-
-If that fails, you can do `` and then `python setup.py build_ext --inplace` to compile the cython modules (although you may not need to do that at all, depending on your machine).
+If that fails, you can try cloning the repo by `git clone https://github.com/harpone/DerpRNN` and then `python setup.py build_ext --inplace` to compile the cython modules (although you may not need to do that at all, depending on your machine).
 
 
 ![](https://github.com/harpone/DerpRNN/blob/master/Mr-derp.png "Mr. Derp")
