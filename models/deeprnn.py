@@ -343,14 +343,14 @@ class DeepRNN(object):
         # shape (depth, timesteps, n_hidden)
 
         # get last layer for readout:
-        h_L = h_1_to_L[-1]  # shape (timesteps, n_hidden)
+        # h_L = h_1_to_L[-1]  # shape (timesteps, n_hidden)
 
         #############################
         ### Training mode readout ###
         #############################
         v_sample, cost, monitor, updates_trn2 = self.readout_layer(readout_operators,
                                                                    v,
-                                                                   h_L,
+                                                                   h_1_to_L,
                                                                    self.ext)
         # - RNG updates are needed in the case of RBM
         updates_trn.update(updates_trn2)
@@ -368,10 +368,10 @@ class DeepRNN(object):
 
         def time_recurrence(h_1_to_L_tm1):  # h ALL layers, shape=(depth, n_hidden)
 
-            h_last = h_1_to_L_tm1[-1][None, :]  # shape (1, n_hidden)
+            h_in = h_1_to_L_tm1[:, None, :]  # shape (depth, 1, n_hidden)
             v_t, _, _, updates_gen = self.readout_layer(readout_operators,
                                                         T.zeros((1, n_visible)),
-                                                        h_last,
+                                                        h_in,
                                                         self.ext)  # shape (1, n_visible)
             # Readin layer:
             h0_t = self.readin_layer(readin_operators, v_t)[0]  # shape (n_hidden, )
@@ -728,8 +728,12 @@ class DeepRNN(object):
 
             readin_params = [W_in, b_in]
 
-        if self.filename is not None:  # override above with loaded values
-            set_loaded_parameters(self.filename, readin_params)
+        if self.filename is not None:  # override with saved state values
+            try:
+                set_loaded_parameters(self.filename, readin_params)
+            except:
+                print('Failed to load parameters... creating new file.')
+                pass
 
         return readin_params, readin_params
 
@@ -784,8 +788,12 @@ class DeepRNN(object):
         else:
             raise Exception('No recurrence layer set!')
 
-        if self.filename is not None:  # override above with loaded values
-            set_loaded_parameters(self.filename, rnn_params)
+        if self.filename is not None:  # override with saved state values
+            try:
+                set_loaded_parameters(self.filename, rnn_params)
+            except:
+                print('Failed to load parameters... creating new file.')
+                pass
 
         return rnn_params, rnn_params
 
@@ -834,8 +842,12 @@ class DeepRNN(object):
 
             readout_params = [W_out, b_out]
 
-        if self.filename is not None:  # override above with loaded values
-            set_loaded_parameters(self.filename, readout_params)
+        if self.filename is not None:  # override with saved state values
+            try:
+                set_loaded_parameters(self.filename, readout_params)
+            except:
+                print('Failed to load parameters... creating new file.')
+                pass
 
         return readout_params, readout_params
 
@@ -901,17 +913,12 @@ class InvariantDeepRNN(DeepRNN):
 
         readin_operators = [w_in_op, b_in]
 
-        if self.filename is not None:  # override above with loaded values
-            #set_loaded_parameters(self.filename, readin_params)
-            file_ = file(self.filename + '.save', 'rb')
-            loaded_params = cPickle.load(file_)
-            file_.close()
-
-            for param in readin_params:
-                for loaded_param in loaded_params:
-                    if param.name == loaded_param.name:
-                        param.set_value(loaded_param.get_value())
-                        break
+        if self.filename is not None:  # override with saved state values
+            try:
+                set_loaded_parameters(self.filename, readin_params)
+            except:
+                print('Failed to load parameters... creating new file.')
+                pass
 
         return readin_params, readin_operators
 
@@ -943,11 +950,15 @@ class InvariantDeepRNN(DeepRNN):
         w0s = tip_input_init(depth, n_hidden, input_scale, name='w0s')
         wzs = tip_input_init(depth, n_hidden, input_scale, name='wzs')
         wrs = tip_input_init(depth, n_hidden, input_scale, name='wrs')
+        bzs_val = np.linspace(4, -4, depth, dtype=theano.config.floatX)
+        bzs = theano.shared(bzs_val[:, None], name='bzs')  # shape (depth, 1)
+        brs_val = np.random.randn(depth).astype(theano.config.floatX)
+        brs = theano.shared(brs_val[:, None], name='brs')  # shape (depth, 1)
 
-        rnn_params = [uhs, uzs, urs, w0s, wzs, wrs]
+        rnn_params = [uhs, uzs, urs, w0s, wzs, wrs, bzs, brs]
 
         # get operators:
-        uhs_op = rep_vec(uhs, n_hidden, n_hidden)
+        uhs_op = rep_vec(uhs, n_hidden, n_hidden)  # shape (depth, 2 * n_hidden - 1)
         uzs_op = rep_vec(uzs, n_hidden, n_hidden)
         urs_op = rep_vec(urs, n_hidden, n_hidden)
         w0s_op = rep_vec(w0s, n_hidden, n_hidden)
@@ -959,13 +970,18 @@ class InvariantDeepRNN(DeepRNN):
                                        urs_op,
                                        w0s_op,
                                        wzs_op,
-                                       wrs_op), axis=1)]
+                                       wrs_op,
+                                       bzs,
+                                       brs), axis=1)]
 
         # else:
         #     raise Exception('No recurrence layer set!')
-
-        if self.filename is not None:  # override above with loaded values
+        if self.filename is not None:  # override with saved state values
+            try:
                 set_loaded_parameters(self.filename, rnn_params)
+            except:
+                print('Failed to load parameters... creating new file.')
+                pass
 
         return rnn_params, rnn_operators
 
@@ -976,30 +992,12 @@ class InvariantDeepRNN(DeepRNN):
         n_hidden = self.n_hidden
         n_hidden_readout = self.n_readout_hidden
         scale = self.readout_scale  # this now will adjust RBM hidden *bias*!!
-
-        # if self.readout_layer == sigmoid_tip_readout:
-        #     w_out_val = np.sqrt(3 / n_hidden) * np.random.randn(n_visible)
-        #     b_out_val = 0.
-        #
-        #     # W_out_val = np.sqrt(3 / n_hidden) * np.random.randn(n_hidden, n_visible)
-        #     # b_out_val = np.zeros(n_visible, dtype=theano.config.floatX)
-        #
-        #     w_out = theano.shared(w_out_val, 'W_out')
-        #     b_out = theano.shared(b_out_val, 'b_out')
-        #
-        #     readout_params = [w_out, b_out]
-        #
-        #     # get operators: (same stacking as in readout case)
-        #     w_out_op = rep_vec(w_out, n_visible, n_hidden)[0]
-        #
-        #     readin_operators = [w_out_op, b_out]
-
-        #if self.readout_layer == rbm_tip_readout:
+        depth = self.depth
 
         # mvec_val = np.sqrt(3 / n_visible) * np.random.randn(n_visible)
         mvec_val = 0.01 * np.random.randn(n_visible)
-        whidvis_val = np.sqrt(3 / n_hidden) * np.random.randn(n_visible)
-        whidhid_val = np.sqrt(3 / n_hidden) * np.random.randn(n_hidden)
+        whidvis_vals = np.sqrt(2 / n_hidden) * np.random.randn(depth, n_visible)
+        whidhid_vals = np.sqrt(2 / n_hidden) * np.random.randn(depth, n_hidden)
         bvis_val = np.array(-scale)
         bhid_val = np.array(0.)
 
@@ -1010,8 +1008,8 @@ class InvariantDeepRNN(DeepRNN):
         # bhid_val = np.zeros((n_hidden_readout, ), dtype=theano.config.floatX)
 
         mvec = theano.shared(mvec_val.astype(theano.config.floatX), 'mmat')
-        whidvis = theano.shared(whidvis_val.astype(theano.config.floatX), 'whidvis')
-        whidhid = theano.shared(whidhid_val.astype(theano.config.floatX), 'whidhid')
+        whidvis = theano.shared(whidvis_vals.astype(theano.config.floatX), 'whidvis')
+        whidhid = theano.shared(whidhid_vals.astype(theano.config.floatX), 'whidhid')
         bvis = theano.shared(bvis_val.astype(theano.config.floatX), 'bvis')
         bhid = theano.shared(bhid_val.astype(theano.config.floatX), 'bhid')
 
@@ -1019,13 +1017,17 @@ class InvariantDeepRNN(DeepRNN):
 
         # get operators:
         mvec_op = rep_vec(mvec, n_visible, n_hidden_readout)[0]
-        whidvis_op = rep_vec(whidvis, n_visible, n_hidden)[0]
-        whidhid_op = rep_vec(whidhid, n_hidden, n_hidden_readout)[0]
+        whidvis_op = rep_vec(whidvis, n_visible, n_hidden)  # shape (depth, n_vis + n_hid - 1)
+        whidhid_op = rep_vec(whidhid, n_hidden, n_hidden_readout)  # shape (depth, n_hid + n_hid_ro - 1)
 
         readout_operators = [mvec_op, whidvis_op, whidhid_op, bvis, bhid]
 
-        if self.filename is not None:  # override above with loaded values
-            set_loaded_parameters(self.filename, readout_params)
+        if self.filename is not None:  # override with saved state values
+            try:
+                set_loaded_parameters(self.filename, readout_params)
+            except:
+                print('Failed to load parameters... creating new file.')
+                pass
 
         return readout_params, readout_operators
 

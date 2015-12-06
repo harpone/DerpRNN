@@ -86,31 +86,33 @@ def gru_tip_layer(operators, h_l_tm1, h_lm1_t):
     :param h_lm1_t:
     :return:
     """
-    #TODO: do in single convolution pass?
+    #TODO: do in single convolution pass? Or ensure MergeOptimize works!
     n_hidden = h_l_tm1.shape[0]
     eff_hidden = 2 * n_hidden - 1
-    uhs_op = operators[:eff_hidden]
-    uzs_op = operators[eff_hidden:2 * eff_hidden]
-    urs_op = operators[2 * eff_hidden:3 * eff_hidden]
-    w0s_op = operators[3 * eff_hidden:4 * eff_hidden]
-    wzs_op = operators[4 * eff_hidden:5 * eff_hidden]
-    wrs_op = operators[5 * eff_hidden:6 * eff_hidden]
+    uh_op = operators[:eff_hidden]
+    uz_op = operators[eff_hidden:2 * eff_hidden]
+    ur_op = operators[2 * eff_hidden:3 * eff_hidden]
+    w0_op = operators[3 * eff_hidden:4 * eff_hidden]
+    wz_op = operators[4 * eff_hidden:5 * eff_hidden]
+    wr_op = operators[5 * eff_hidden:6 * eff_hidden]
+    bz = operators[-2]
+    br = operators[-1]
 
     #print(h_lm1_t.dtype)  # 64??
     #print(h_l_tm1.dtype)
-    #TODO: these convolutions fucked up!!!!!!!!!!!!!!!
-    u_lm1_t_dot_W0 = convolution(w0s_op[None, :], h_lm1_t[None, :])[0]
-    u_l_tm1_dot_Uz = convolution(uzs_op[None, :], h_l_tm1[None, :])[0]
-    u_lm1_t_dot_Wz = convolution(wzs_op[None, :], h_lm1_t[None, :])[0]
-    u_l_tm1_dot_Ur = convolution(urs_op[None, :], h_l_tm1[None, :])[0]
-    u_lm1_t_dot_Wr = convolution(wrs_op[None, :], h_lm1_t[None, :])[0]
+    #TODO: MergeOptimize fails with these convolutions!
+    u_lm1_t_dot_W0 = convolution(w0_op[None, :], h_lm1_t[None, :])[0]
+    u_l_tm1_dot_Uz = convolution(uz_op[None, :], h_l_tm1[None, :])[0]
+    u_lm1_t_dot_Wz = convolution(wz_op[None, :], h_lm1_t[None, :])[0]
+    u_l_tm1_dot_Ur = convolution(ur_op[None, :], h_l_tm1[None, :])[0]
+    u_lm1_t_dot_Wr = convolution(wr_op[None, :], h_lm1_t[None, :])[0]
 
     # update and reset gate evolution:
-    z_t = T.nnet.sigmoid(u_l_tm1_dot_Uz + u_lm1_t_dot_Wz)
-    r_t = T.nnet.sigmoid(u_l_tm1_dot_Ur + u_lm1_t_dot_Wr)
+    z_t = T.nnet.sigmoid(u_l_tm1_dot_Uz + u_lm1_t_dot_Wz + bz)
+    r_t = T.nnet.sigmoid(u_l_tm1_dot_Ur + u_lm1_t_dot_Wr + br)
 
     # hidden state dot prod:
-    r_t_u_tm1_dot_U = convolution(uhs_op[None, :], h_l_tm1[None, :] * r_t[None, :])[0]
+    r_t_u_tm1_dot_U = convolution(uh_op[None, :], h_l_tm1[None, :] * r_t[None, :])[0]
 
     # hidden state evolution:
     h_l_t = (1 - z_t) * h_l_tm1 + z_t * T.tanh(r_t_u_tm1_dot_U + u_lm1_t_dot_W0)
@@ -148,9 +150,10 @@ def tanh_tip_readin(operators, in_):
     return out
 
 
-def rbm_readout(operators, v_in, h_L, external):
+def rbm_readout(operators, v_in, h, external):
     #TODO: adjust Gibbs sampling size?
 
+    h_L = h[-1]  # shape (timesteps, n_hidden)
     Mmat = operators[0]  # shape (n_visible, n_hidden_readout)
     Whidvis = operators[1]  # shape (n_hidden, n_visible)
     Whidhid = operators[2]  # shape (n_hidden, n_hidden_readout)
@@ -197,18 +200,36 @@ def rbm_readout(operators, v_in, h_L, external):
     return v_sample, cost, monitor, updates
 
 
-def rbm_tip_readout(operators, v_in, h_L, external):
-    #TODO: check this!!!
+def rbm_tip_readout(operators, v_in, h, external):
+    """
+
+    :param operators:
+    :param v_in:
+    :param h: shape (depth, timesteps, n_hidden)
+    :param external:
+    :return:
+    """
 
     mvec_op = operators[0]
-    whidvis_op = operators[1]
-    whidhid_op = operators[2]
-    bvis_op = operators[3] + external
+    whidvis_op = operators[1]  # shape (depth, n_vis + n_hid - 1)
+    whidhid_op = operators[2]  # shape (depth, n_hid + n_hid_ro - 1)
+    bvis_op = operators[3] + external  # add external inhomogeneous field
     bhid_op = operators[4]
 
-    # compute dynamic biases (batch):
-    bv_t = bvis_op + convolution(whidvis_op[None, :], h_L[:, None, :])[:, 0, :]
-    bh_t = bhid_op + convolution(whidhid_op[None, :], h_L[:, None, :])[:, 0, :]
+    # compute dynamic biases (old):
+    #bv_t = bvis_op + convolution(whidvis_op[None, :], h_L[:, None, :])[:, 0, :]
+    #bh_t = bhid_op + convolution(whidhid_op[None, :], h_L[:, None, :])[:, 0, :]
+
+    # compute dynamic biases with all layers:
+    bv_biases, _ = theano.scan(lambda w_l, h_l: convolution(w_l[None, :], h_l[:, None, :])[:, 0, :],
+                sequences=[whidvis_op, h],
+                name='all RBM bv convolutions')  # shape (depth, timesteps, n_vis) (?)
+    bh_biases, _ = theano.scan(lambda w_l, h_l: convolution(w_l[None, :], h_l[:, None, :])[:, 0, :],
+                sequences=[whidhid_op, h],
+                name='all RBM bh convolutions')  # shape (depth, timesteps, n_hid) (?)
+
+    bv_t = bvis_op + T.sum(bv_biases, axis=0)
+    bh_t = bhid_op + T.sum(bh_biases, axis=0)
 
     mvec_cT = mvec_op[::-1]
     def gibbs_step(v_in, bv, bh):  # input shape (timesteps, n_visible); no scan slicing!
