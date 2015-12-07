@@ -133,7 +133,7 @@ class DeepRNN(object):
             self.readout_layer = softmax_readout
 
 
-        self.epsilon = 1e-8  # epsilon parameter for Adadelta
+        self.epsilon = 1e-7  # epsilon parameter for Adadelta
         self.dataset = None
         self.costs = None
         self.monitors = None
@@ -180,6 +180,7 @@ class DeepRNN(object):
         self.parameters = params
         self.optimizer = optimizer
 
+        # TODO: how does "consider_constant" affect the *other* radouts??
         gradient = T.grad(cost, params, consider_constant=[v_sample])
 
         # select optimizer function:
@@ -322,7 +323,7 @@ class DeepRNN(object):
         # - outer loop over layers, inner loop over time
         # h_init_trn = T.zeros((n_hidden, ))  # training initial state is always zero
         # Train also initial state (*very* important fot TI version!):
-        h_init_vals = 0.1 * np.random.uniform(-1, 1, size=(self.depth, n_hidden)).astype(theano.config.floatX)
+        h_init_vals = 0.9 * np.random.uniform(-1, 1, size=(self.depth, n_hidden)).astype(theano.config.floatX)
         h_init_trn = theano.shared(h_init_vals, name='h_init_trn')
         self.h_init_trn = h_init_trn
         # add to parameters:
@@ -433,11 +434,11 @@ class DeepRNN(object):
         self.stm1 = stm1
         self.gradient = gradient
 
-        gt = [(1 - gamma) * theano.gradient.grad_clip(grad_i, -1, 1) ** 2 + gamma * gtm1_i
+        gt = [(1 - gamma) * T.clip(grad_i, -1, 1) ** 2 + gamma * gtm1_i
               for grad_i, gtm1_i in zip(gradient, gtm1)]
 
         dparams = [T.sqrt((stm1_i + eps_) / (gt_i + eps_)) *
-                   theano.gradient.grad_clip(grad_i, -1, 1)
+                   T.clip(grad_i, -1, 1)
                    for stm1_i, gt_i, grad_i in
                    zip(stm1, gt, gradient)]
 
@@ -569,15 +570,15 @@ class DeepRNN(object):
                 time_elapsed = time.time() - start_time
 
                 # Nearest neighbors in parameter space:
-                param_vec_next = np.array([])
-                for param in self.parameters:
-                    param_vec_next = np.concatenate((param_vec_next, param.get_value().flatten()))
+                # param_vec_next = np.array([])
+                # for param in self.parameters:
+                #     param_vec_next = np.concatenate((param_vec_next, param.get_value().flatten()))
 
                 #flann_params = flann.build_index(param_vec, target_precision=.9)
                 #nn_dist = np.sqrt(flann.nn(param_vec, param_vec_next, 1)[1][0])
 
                 # add to previous parameter vectors:
-                param_vec = np.vstack((param_vec, param_vec_next))
+                # param_vec = np.vstack((param_vec, param_vec_next))
 
                 print('\rEpoch {:4}/{} | Cost mean={:6.3f}, std={:6.3f} | '
                       'Monitor mean={:6.4f}, std={:6.3f} | '
