@@ -29,7 +29,7 @@ new_dataset = []
 
 for n, song in enumerate(dataset):
     #print(len(song))
-    if len(song) > 100:
+    if len(song) > 300:
         new_dataset.append(song)
 
 dataset = new_dataset

@@ -157,7 +157,7 @@ class DeepRNN(object):
         # train or generate mode?
         self.training_mode = True
 
-        lr = T.scalar('Learn rate')
+        lr = T.scalar('Learn rate', dtype=theano.config.floatX)
         lr.tag.test_value = 1.
         gamma = T.scalar('Adadelta gamma (slowness)')
         gamma.tag.test_value = .9
@@ -320,16 +320,23 @@ class DeepRNN(object):
         ### TRAINING MODE ###
         #####################
         # - outer loop over layers, inner loop over time
-        h_init_trn = T.zeros((n_hidden, ))  # training initial state is always zero
+        # h_init_trn = T.zeros((n_hidden, ))  # training initial state is always zero
+        # Train also initial state (*very* important fot TI version!):
+        h_init_vals = 0.1 * np.random.uniform(-1, 1, size=(self.depth, n_hidden)).astype(theano.config.floatX)
+        h_init_trn = theano.shared(h_init_vals, name='h_init_trn')
+        self.h_init_trn = h_init_trn
+        # add to parameters:
+        params += [h_init_trn]
 
-        def layer_recurrence(rnn_params_, h_lm1):
+
+        def layer_recurrence(rnn_params_, h_init,  h_lm1):
             """Propagates hidden state of shape (timesteps, n_hidden)
             upwards to higher layer.
             """
 
             h_l, updates_trn_inner = theano.scan(evolve_trn,
                                                 sequences=[h_lm1],  # slice (n_hidden, )
-                                                outputs_info=[h_init_trn],
+                                                outputs_info=[h_init],
                                                 non_sequences=rnn_params_,
                                                 name='recurrence train scan')
 
@@ -337,7 +344,7 @@ class DeepRNN(object):
 
         # perform layer-wise recurrence:
         h_1_to_L, updates_trn = theano.scan(layer_recurrence,
-                    sequences=rnn_operators,  # shape (depth, ...)
+                    sequences=rnn_operators + [h_init_trn],  # shapes (depth, ...)
                     outputs_info=[h0],  # shape (timesteps, n_hidden)
                     name='layer recurrence scan')
         # shape (depth, timesteps, n_hidden)
@@ -413,7 +420,7 @@ class DeepRNN(object):
         stm1 = [shared_zeros(param.get_value().shape, param.name + '_s') for param in params]
 
         if self.filename is not None:  # override with saved state values
-            print('Loading parameters from file {}.save'.format(self.filename))
+            print('Loading parameters from file {}.zip'.format(self.filename))
             sys.stdout.flush()
             try:
                 set_loaded_parameters(self.filename, gtm1 + stm1)
@@ -426,11 +433,11 @@ class DeepRNN(object):
         self.stm1 = stm1
         self.gradient = gradient
 
-        gt = [(1 - gamma) * grad_i ** 2 + gamma * gtm1_i
+        gt = [(1 - gamma) * theano.gradient.grad_clip(grad_i, -1, 1) ** 2 + gamma * gtm1_i
               for grad_i, gtm1_i in zip(gradient, gtm1)]
 
         dparams = [T.sqrt((stm1_i + eps_) / (gt_i + eps_)) *
-                   theano.gradient.grad_clip(grad_i, -10, 10)
+                   theano.gradient.grad_clip(grad_i, -1, 1)
                    for stm1_i, gt_i, grad_i in
                    zip(stm1, gt, gradient)]
 
@@ -652,8 +659,9 @@ class DeepRNN(object):
         if initial_data is not None:
             initial_state = self.generate_hidden_states(initial_data, 0., .9)[:, -1, :]
         else:
-            initial_state = np.zeros((self.depth, self.n_hidden), dtype=theano.config.floatX)
+            #initial_state = np.zeros((self.depth, self.n_hidden), dtype=theano.config.floatX)
             #initial_state = np.random.randn(self.depth, self.n_hidden).astype(theano.config.floatX)
+            initial_state = self.h_init_trn
         #print(initial_state.shape) # shape (depth, n_hidden)
 
         # construct external field:
@@ -732,7 +740,7 @@ class DeepRNN(object):
             try:
                 set_loaded_parameters(self.filename, readin_params)
             except:
-                print('Failed to load parameters... creating new file.')
+                #print('Failed to load parameters... creating new file.')
                 pass
 
         return readin_params, readin_params
@@ -792,7 +800,7 @@ class DeepRNN(object):
             try:
                 set_loaded_parameters(self.filename, rnn_params)
             except:
-                print('Failed to load parameters... creating new file.')
+                #print('Failed to load parameters... creating new file.')
                 pass
 
         return rnn_params, rnn_params
@@ -846,7 +854,7 @@ class DeepRNN(object):
             try:
                 set_loaded_parameters(self.filename, readout_params)
             except:
-                print('Failed to load parameters... creating new file.')
+                #print('Failed to load parameters... creating new file.')
                 pass
 
         return readout_params, readout_params
@@ -917,7 +925,7 @@ class InvariantDeepRNN(DeepRNN):
             try:
                 set_loaded_parameters(self.filename, readin_params)
             except:
-                print('Failed to load parameters... creating new file.')
+                #print('Failed to load parameters... creating new file.')
                 pass
 
         return readin_params, readin_operators
@@ -980,7 +988,7 @@ class InvariantDeepRNN(DeepRNN):
             try:
                 set_loaded_parameters(self.filename, rnn_params)
             except:
-                print('Failed to load parameters... creating new file.')
+                #print('Failed to load parameters... creating new file.')
                 pass
 
         return rnn_params, rnn_operators
@@ -1026,7 +1034,7 @@ class InvariantDeepRNN(DeepRNN):
             try:
                 set_loaded_parameters(self.filename, readout_params)
             except:
-                print('Failed to load parameters... creating new file.')
+                #print('Failed to load parameters... creating new file.')
                 pass
 
         return readout_params, readout_operators
