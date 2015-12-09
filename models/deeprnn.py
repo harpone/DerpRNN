@@ -427,6 +427,7 @@ class DeepRNN(object):
                 set_loaded_parameters(self.filename, gtm1 + stm1)
             except:
                 print('Failed to load parameters... creating new file.')
+                sys.stdout.flush()
                 pass
 
         # for storing the full state of optimizer:
@@ -542,6 +543,18 @@ class DeepRNN(object):
                             continue
 
                         monitor, cost = self.train_function(batch, *hyperparams)
+
+                        #TODO: revert to saved parameters in case of nans (?)
+                        if cost is np.nan:
+                            print('NaN encountered, breaking!')
+                            done = True
+                            break
+
+                        if np.abs(cost) > 1E+6:
+                            print('Cost blow up, breaking!')
+                            done = True
+                            break
+
                         costs.append(cost)
                         monitors.append(monitor)
                         pct_progress = int(100 * n / nbatches)
@@ -662,7 +675,7 @@ class DeepRNN(object):
         else:
             #initial_state = np.zeros((self.depth, self.n_hidden), dtype=theano.config.floatX)
             #initial_state = np.random.randn(self.depth, self.n_hidden).astype(theano.config.floatX)
-            initial_state = self.h_init_trn
+            initial_state = self.h_init_trn.get_value()
         #print(initial_state.shape) # shape (depth, n_hidden)
 
         # construct external field:
