@@ -8,6 +8,7 @@ import sys
 
 from distutils.core import setup
 from distutils.extension import Extension
+import numpy
 #import models.deeprnn
 
 if USE_CYTHON:
@@ -21,7 +22,8 @@ base_dir = 'python2'
 
 ext = '.pyx' if USE_CYTHON else '.c'
 
-extensions = [Extension("ctools/nonpytools", ["ctools/nonpytools" + ext])]
+extensions = [Extension("ctools/nonpytools", ["ctools/nonpytools" + ext],
+                        include_dirs=[numpy.get_include()])]
 
 if USE_CYTHON:
     from Cython.Build import cythonize
