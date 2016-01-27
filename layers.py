@@ -8,6 +8,7 @@ from theano import tensor as T
 from theano.tensor.signal.conv import conv2d as conv_signal
 #from theano.tensor.shared_randomstreams import RandomStreams
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
+from theano.sandbox.softsign import softsign
 from theano.compile.debugmode import DebugMode
 
 # Local imports:
@@ -28,13 +29,14 @@ theano.config.warn.signal_conv2d_interface = False
 #convolution = conv_nnet  # won't work...
 convolution = conv_signal
 crossent = T.nnet.binary_crossentropy
-eps = 1E-7
+eps = 1E-6
 
 # global parameters:
 min_steps_in_batch = 3  # require this many nonzero notes in batch
 
-#TODO: try tanh based on hard_sigmoid!!
-tanh = T.tanh
+#TODO: note softsign!!!
+#tanh = T.tanh
+tanh = softsign
 sigmoid = T.nnet.hard_sigmoid
 softmax = T.nnet.softmax
 
@@ -77,6 +79,27 @@ def gru_layer(operators, h_l_tm1, h_lm1_t):
 
     return h_l_t
 
+def sru_tip_layer(operators, h_l_tm1, h_lm1_t):
+    """
+
+    :param operators:
+    :param h_l_tm1:
+    :param h_lm1_t:
+    :return:
+    """
+    n_hidden = h_l_tm1.shape[0]
+    eff_hidden = 2 * n_hidden - 1
+    uh_op = operators[:eff_hidden]
+    wh_op = operators[eff_hidden:2 * eff_hidden]
+
+    h_lm1_t_dot_W = convolution(wh_op[None, :], h_lm1_t[None, :])[0]
+    h_l_tm1_dot_U = convolution(uh_op[None, :], h_l_tm1[None, :])[0]
+
+    h_l_t = tanh(h_l_tm1_dot_U + h_lm1_t_dot_W)
+
+    return h_l_t
+
+
 
 def gru_tip_layer(operators, h_l_tm1, h_lm1_t):
     """
@@ -116,6 +139,29 @@ def gru_tip_layer(operators, h_l_tm1, h_lm1_t):
 
     # hidden state evolution:
     h_l_t = (1 - z_t) * h_l_tm1 + z_t * T.tanh(r_t_u_tm1_dot_U + u_lm1_t_dot_W0)
+
+    return h_l_t
+
+
+def kpz_layer(operators, h_l_tm1, h_lm1_t):
+    """
+
+    :param operators: shape ()
+        One layer's concatenated weights of shape
+        (n_rec, 2 * n_rec + 1). Last col is w vector
+        Weights W, U are vertically stacked, weights for h, z, r horizontally
+    :param h_l_tm1: shape (n_hidden, )
+    :param h_lm1_t:
+    :return:
+    """
+    n_rec = T.shape(h_l_tm1)[0]
+    W = operators[:, 0:n_rec]
+    U = operators[:, n_rec:2 * n_rec]
+    w = operators[:, -1]  # shape (n_rec, )
+
+    growth_term = h_l_tm1 * h_l_tm1 * T.sum(w) - 2 * h_l_tm1 * T.dot(w, h_l_tm1) + T.dot(w, h_l_tm1 * h_l_tm1)
+
+    h_l_t = T.dot(h_l_tm1, W) + T.dot(h_lm1_t, U) + growth_term
 
     return h_l_t
 
@@ -211,8 +257,8 @@ def rbm_tip_readout(operators, v_in, h, external):
     """
 
     mvec_op = operators[0]
-    whidvis_op = operators[1]  # shape (depth, n_vis + n_hid - 1)
-    whidhid_op = operators[2]  # shape (depth, n_hid + n_hid_ro - 1)
+    whidvis_op = operators[1]  # shape (n_layers, n_vis + n_hid - 1)
+    whidhid_op = operators[2]  # shape (n_layers, n_hid + n_hid_ro - 1)
     bvis_op = operators[3] + external  # add external inhomogeneous field
     bhid_op = operators[4]
 
@@ -223,10 +269,10 @@ def rbm_tip_readout(operators, v_in, h, external):
     # compute dynamic biases with all layers:
     bv_biases, _ = theano.scan(lambda w_l, h_l: convolution(w_l[None, :], h_l[:, None, :])[:, 0, :],
                 sequences=[whidvis_op, h],
-                name='all RBM bv convolutions')  # shape (depth, timesteps, n_vis) (?)
+                name='all RBM bv convolutions')  # shape (depth, timesteps, n_vis)
     bh_biases, _ = theano.scan(lambda w_l, h_l: convolution(w_l[None, :], h_l[:, None, :])[:, 0, :],
                 sequences=[whidhid_op, h],
-                name='all RBM bh convolutions')  # shape (depth, timesteps, n_hid) (?)
+                name='all RBM bh convolutions')  # shape (depth, timesteps, n_hid)
 
     bv_t = bvis_op + T.sum(bv_biases, axis=0)
     bh_t = bhid_op + T.sum(bh_biases, axis=0)
@@ -265,7 +311,8 @@ def rbm_tip_readout(operators, v_in, h, external):
 
     def free_energy(v):  # input shape (timesteps, n_visible)
         v_dot_W0 = convolution(mvec_op[None, :], v[:, None, :])[:, 0, :]
-        return -(v * bv_t[:-1]).sum() - T.log(1 + T.exp(v_dot_W0 + bh_t[:-1])).sum()
+        # TODO: adjusted eps to 1E-6 and added eps in the log below (got nans; not sure if this fixes it)
+        return -(v * bv_t[:-1]).sum() - T.log(1 + eps + T.exp(v_dot_W0 + bh_t[:-1])).sum()
     # v_t predicts v_sample_tp1:
     cost = (free_energy(v_in[1:]) - free_energy(v_sample[:-1])) / v_in.shape[0]
 

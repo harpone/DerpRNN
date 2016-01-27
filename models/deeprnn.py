@@ -10,6 +10,8 @@ from collections import OrderedDict
 from random import shuffle
 
 import theano
+from theano.tensor.fourier import fft
+from theano.compile.nanguardmode import NanGuardMode
 from theano import tensor as T
 from theano.tensor.signal.conv import conv2d as conv_signal
 #from theano.tensor.shared_randomstreams import RandomStreams
@@ -35,6 +37,7 @@ theano.config.compute_test_value = 'off'
 
 # Debug mode:
 #mode = 'DebugMode'
+DebugMode.check_py = False  # checking for nans
 mode = None
 #mode ='FAST_COMPILE'
 theano.config.warn.signal_conv2d_interface = False
@@ -75,6 +78,7 @@ class DeepRNN(object):
                  rnn_layer='sru',
                  readout_layer='sigmoid',
                  n_visible=88,
+                 out_layers='all',
                  optimizer='adadelta',
                  state_from_file=None,
                  sparsity=.15,
@@ -84,7 +88,8 @@ class DeepRNN(object):
                  readout_scale=2.,
                  dropout=0.,
                  input_dropout=0.,
-                 input_noise=0.):
+                 input_noise=0.,
+                 research_mode=False):
         """
         :param depth: uint; number of rnn layers
         :param width: uint; hidden and hidden recurrent sizes are
@@ -125,6 +130,8 @@ class DeepRNN(object):
             self.rnn_layer = sru_layer  # SRU = Standard Recurrence Unit
         elif rnn_layer is 'gru':
             self.rnn_layer = gru_layer  # GRU = Gated Recurrence Unit
+        elif rnn_layer is 'kpz':
+            self.rnn_layer = kpz_layer  # KPZ-like layer; !!!EXPERIMENTAL!!!
         if readout_layer is 'sigmoid':
             self.readout_layer = sigmoid_readout
         elif readout_layer is 'rbm':
@@ -132,6 +139,10 @@ class DeepRNN(object):
         elif readout_layer is 'softmax':
             self.readout_layer = softmax_readout
 
+        if out_layers is 'last':
+            self.n_layers = 1
+        elif out_layers is 'all':
+            self.n_layers = depth
 
         self.epsilon = 1e-7  # epsilon parameter for Adadelta
         self.dataset = None
@@ -175,7 +186,7 @@ class DeepRNN(object):
         ######################
         (v, v_sample, cost, monitor, params,
          updates_train, v_gen, updates_generate,
-         h_1_to_L, u0_gen) = self.build_rnn_network
+         h_1_to_L, u0_gen, h0_readin) = self.build_rnn_network
 
         self.parameters = params
         self.optimizer = optimizer
@@ -203,25 +214,27 @@ class DeepRNN(object):
             [monitor, cost],
             updates=updates_train,
             on_unused_input='warn',
+            #mode=NanGuardMode(nan_is_error=True, inf_is_error=False),
             mode=mode,
-            name='train'
+            name='train function'
         )
         self.generate_function = theano.function(
             [self.timesteps, u0_gen],
             v_gen,
             updates=updates_generate,
             on_unused_input='warn',
+            #mode=NanGuardMode(nan_is_error=True, inf_is_error=False),
             mode=mode,
-            name='generate'
+            name='generate function'
         )
 
         self.generate_hidden_states = theano.function(
             train_function_ins,
-            h_1_to_L,
+            [h0_readin, h_1_to_L],
             on_unused_input='warn',
             updates=updates_train,
             mode=mode,
-            name='generate hidden states'
+            name='generate hidden states function'
         )
 
     @property
@@ -253,17 +266,14 @@ class DeepRNN(object):
 
         params = readin_params + rnn_params + readout_params
 
-        # Get model operators from parameters:
-        # (just returns the original parameters for base class)
-        # readin_operators = self.get_operators(readin_params, n_visible, n_hidden)
-        # rnn_operators = self.get_operators(rnn_params, n_hidden, n_hidden)
-        # readout_operators = self.get_operators(readout_params, n_hidden, n_hidden_readout)
+        # for debugging and inspection purposes:
+        self.operators = readin_operators + rnn_operators + readout_operators
 
         # Input variable:
         v = T.matrix()  # shape (timesteps, n_visible)
         v.tag.test_value = np.random.randn(5, n_visible).astype(theano.config.floatX)
 
-        # Apply regularization to input:
+        # Apply noise to input:
         #NOTE: damn this is slow!!
         if self.input_noise > 0. and self.training_mode:  # overrides input dropout!
             noise = rng.binomial(size=v.shape,
@@ -321,13 +331,18 @@ class DeepRNN(object):
         ### TRAINING MODE ###
         #####################
         # - outer loop over layers, inner loop over time
-        # h_init_trn = T.zeros((n_hidden, ))  # training initial state is always zero
-        # Train also initial state (*very* important fot TI version!):
-        h_init_vals = 0.9 * np.random.uniform(-1, 1, size=(self.depth, n_hidden)).astype(theano.config.floatX)
+        h_init_vals = np.zeros((self.depth, n_hidden)).astype(theano.config.floatX)
         h_init_trn = theano.shared(h_init_vals, name='h_init_trn')
         self.h_init_trn = h_init_trn
+        # try load:
+        if self.filename is not None:  # override with saved state values
+            try:
+                set_loaded_parameters(self.filename, [h_init_trn])
+            except:
+                #print('Failed to load parameters... creating new file.')
+                pass
         # add to parameters:
-        params += [h_init_trn]
+        #params += [h_init_trn]  # NOT INCLUDED since violates TI
 
 
         def layer_recurrence(rnn_params_, h_init,  h_lm1):
@@ -356,9 +371,12 @@ class DeepRNN(object):
         #############################
         ### Training mode readout ###
         #############################
+        depth = self.depth
+        n_layers = self.n_layers
+        contributing_layers = h_1_to_L[depth - n_layers:]
         v_sample, cost, monitor, updates_trn2 = self.readout_layer(readout_operators,
                                                                    v,
-                                                                   h_1_to_L,
+                                                                   contributing_layers,
                                                                    self.ext)
         # - RNG updates are needed in the case of RBM
         updates_trn.update(updates_trn2)
@@ -371,12 +389,12 @@ class DeepRNN(object):
 
         # Generating mode init variables:
         h_init_gen = T.matrix()
-        h_init_gen.tag.test_value = np.random.randn(self.depth, n_hidden).astype(np.float32)
+        h_init_gen.tag.test_value = np.random.randn(depth, n_hidden).astype(np.float32)
         #print(rnn_operators.eval())  # is ok
 
         def time_recurrence(h_1_to_L_tm1):  # h ALL layers, shape=(depth, n_hidden)
 
-            h_in = h_1_to_L_tm1[:, None, :]  # shape (depth, 1, n_hidden)
+            h_in = h_1_to_L_tm1[depth - n_layers:, None, :]  # shape (n_layers, 1, n_hidden)
             v_t, _, _, updates_gen = self.readout_layer(readout_operators,
                                                         T.zeros((1, n_visible)),
                                                         h_in,
@@ -404,7 +422,7 @@ class DeepRNN(object):
         v_gen = v_gen[:, 0, :]
 
         return (v, v_sample, cost, monitor, params, updates_trn, v_gen,
-                updates_gen, h_1_to_L, h_init_gen)
+                updates_gen, h_1_to_L, h_init_gen, h0)
 
     def adadelta(self, params, gradient, lr, gamma):
         """Adadelta optimizer function.
@@ -545,15 +563,11 @@ class DeepRNN(object):
                         monitor, cost = self.train_function(batch, *hyperparams)
 
                         #TODO: revert to saved parameters in case of nans (?)
-                        if cost is np.nan:
-                            print('NaN encountered, breaking!')
-                            done = True
-                            break
+                        if np.isnan(cost):
+                            raise ValueError('\nNaN encountered, breaking out!')
 
-                        if np.abs(cost) > 1E+6:
-                            print('Cost blow up, breaking!')
-                            done = True
-                            break
+                        if np.abs(cost) > 1E+9:
+                            raise ValueError('\nCost blew up, breaking out!')
 
                         costs.append(cost)
                         monitors.append(monitor)
@@ -641,6 +655,7 @@ class DeepRNN(object):
                  show=True,
                  timesteps=200,
                  initial_data=None,
+                 temperature=1.,
                  ext_magnitude=0.,
                  ext_regularization=.5,
                  ext_overemphasize=1.):
@@ -671,7 +686,7 @@ class DeepRNN(object):
 
         # get initial hidden state from seed data:
         if initial_data is not None:
-            initial_state = self.generate_hidden_states(initial_data, 0., .9)[:, -1, :]
+            initial_state = self.generate_hidden_states(initial_data, 0., .9)[1][:, -1, :]
         else:
             #initial_state = np.zeros((self.depth, self.n_hidden), dtype=theano.config.floatX)
             #initial_state = np.random.randn(self.depth, self.n_hidden).astype(theano.config.floatX)
@@ -688,9 +703,35 @@ class DeepRNN(object):
         ext = ext.astype(theano.config.floatX)
         self.ext.set_value(ext)
 
-        generated_data = self.generate_function(timesteps, initial_state)
-        generated_data = np.round(generated_data)
-        #print(generated_data.shape)
+        # adjust temperature:
+        if temperature != 1.:
+            print('Generating with temperature {}'.format(temperature))
+            sys.stdout.flush()
+            if self.readout_layer == rbm_readout:
+                rbm_params = self.parameters[3:8]
+            elif self.readout_layer == rbm_tip_readout:
+                rbm_params = self.parameters[10:-1]
+
+            # bake in temperature:
+            for param in rbm_params:
+                param_val = param.get_value()
+                param_val /= temperature
+                param.set_value(param_val)
+            # generate:
+            generated_data = self.generate_function(timesteps, initial_state)
+            generated_data = np.round(generated_data)
+            # restore temperature = 1 values:
+            for param in rbm_params:
+                param_val = param.get_value()
+                param_val *= temperature
+                param.set_value(param_val)
+
+
+
+        else:
+            generated_data = self.generate_function(timesteps, initial_state)
+            generated_data = np.round(generated_data)
+
         if initial_data is not None:
             self.generated_data = np.concatenate((initial_data, generated_data), axis=0).astype(np.int64)
         else:
@@ -807,6 +848,18 @@ class DeepRNN(object):
 
             rnn_params = [Ws_gru]
 
+        elif self.rnn_layer == kpz_layer:
+
+            Ws_kpz_val = np.zeros((depth, n_hidden, 2 * n_hidden + 1))
+            for layer in xrange(depth):
+                W = np.random.randn(n_hidden, n_hidden)
+                maxeig = np.max(np.abs(np.linalg.eigvals(W)))
+                W *= rec_spec_rad / maxeig
+                U = in_spec_rad * np.random.randn(n_hidden, n_hidden) / np.sqrt(n_hidden)
+                w = 0.01 * np.random.randn(n_hidden)
+
+
+
         else:
             raise Exception('No recurrence layer set!')
 
@@ -877,8 +930,6 @@ class DeepRNN(object):
 class InvariantDeepRNN(DeepRNN):
     """Translation invariant and periodic (TIP) version of the DeepRNN class.
 
-    - Initialize weight vectors by tip_init
-    - Repeat by rep_vec
     - No point in using readout_width > 1!!!
 
     """
@@ -894,10 +945,19 @@ class InvariantDeepRNN(DeepRNN):
         rnn_layer = kwargs.pop('rnn_layer')
         readout_layer = kwargs.pop('readout_layer')
 
+        try:
+            self.constrain_eigvals = kwargs.pop('constrain_eigvals')  # boolean
+        except KeyError:
+            self.constrain_eigvals = False
+            print('Eigenvalues not constrained.')
+
         if readin_layer is 'tanh':
             self.readin_layer = tanh_tip_readin
             kwargs['readin_layer'] = None
-        if rnn_layer is 'gru':
+        if rnn_layer is 'sru':
+            self.rnn_layer = sru_tip_layer
+            kwargs['rnn_layer'] = None
+        elif rnn_layer is 'gru':
             self.rnn_layer = gru_tip_layer
             kwargs['rnn_layer'] = None
         if readout_layer is 'rbm':
@@ -917,9 +977,9 @@ class InvariantDeepRNN(DeepRNN):
 
         n_visible = self.n_visible
         n_hidden = self.n_hidden
-
+        scale = self.readin_input_scale
         #if self.readin_layer == tanh_tip_readin:
-        w_in_val = np.sqrt(2 / n_visible) * np.random.randn(n_visible)
+        w_in_val = scale * np.sqrt(2 / n_visible) * np.random.randn(n_visible)
         b_in_val = np.array(0.)
 
         # W_in_val = np.sqrt(3 / n_visible) * np.random.randn(n_visible, n_hidden)
@@ -961,43 +1021,26 @@ class InvariantDeepRNN(DeepRNN):
         n_hidden = self.n_hidden
         sparsity = self.sparsity
         rec_spec_rad = self.recurrence_spectral_radius
-        input_scale = self.recurrence_input_scale
+        input_rad = self.recurrence_input_scale  # input mat is now also orthogonal
         depth = self.depth
 
-        #if self.rnn_layer == gru_tip_layer:
-        # parameters:
-        uhs = tip_init(depth, n_hidden, sparsity, rec_spec_rad, name='uhs')
-        uzs = tip_init(depth, n_hidden, sparsity, rec_spec_rad, name='uzs')
-        urs = tip_init(depth, n_hidden, sparsity, rec_spec_rad, name='urs')
-        w0s = tip_input_init(depth, n_hidden, input_scale, name='w0s')
-        wzs = tip_input_init(depth, n_hidden, input_scale, name='wzs')
-        wrs = tip_input_init(depth, n_hidden, input_scale, name='wrs')
-        bzs_val = np.linspace(4, -4, depth, dtype=theano.config.floatX)
-        bzs = theano.shared(bzs_val[:, None], name='bzs')  # shape (depth, 1)
-        brs_val = np.random.randn(depth).astype(theano.config.floatX)
-        brs = theano.shared(brs_val[:, None], name='brs')  # shape (depth, 1)
+        if self.rnn_layer == sru_tip_layer:
+            rnn_params, rnn_operators = get_sru_tip_params(n_hidden,
+                                                           sparsity,
+                                                           rec_spec_rad,
+                                                           input_rad,
+                                                           depth,
+                                                           self.constrain_eigvals)
 
-        rnn_params = [uhs, uzs, urs, w0s, wzs, wrs, bzs, brs]
+        elif self.rnn_layer == gru_tip_layer:
 
-        # get operators:
-        uhs_op = rep_vec(uhs, n_hidden, n_hidden)  # shape (depth, 2 * n_hidden - 1)
-        uzs_op = rep_vec(uzs, n_hidden, n_hidden)
-        urs_op = rep_vec(urs, n_hidden, n_hidden)
-        w0s_op = rep_vec(w0s, n_hidden, n_hidden)
-        wzs_op = rep_vec(wzs, n_hidden, n_hidden)
-        wrs_op = rep_vec(wrs, n_hidden, n_hidden)
+            rnn_params, rnn_operators = get_gru_tip_params(n_hidden,
+                                                           sparsity,
+                                                           rec_spec_rad,
+                                                           input_rad,
+                                                           depth,
+                                                           self.constrain_eigvals)
 
-        rnn_operators = [T.concatenate((uhs_op,
-                                       uzs_op,
-                                       urs_op,
-                                       w0s_op,
-                                       wzs_op,
-                                       wrs_op,
-                                       bzs,
-                                       brs), axis=1)]
-
-        # else:
-        #     raise Exception('No recurrence layer set!')
         if self.filename is not None:  # override with saved state values
             try:
                 set_loaded_parameters(self.filename, rnn_params)
@@ -1015,11 +1058,12 @@ class InvariantDeepRNN(DeepRNN):
         n_hidden_readout = self.n_readout_hidden
         scale = self.readout_scale  # this now will adjust RBM hidden *bias*!!
         depth = self.depth
+        n_layers = self.n_layers
 
         # mvec_val = np.sqrt(3 / n_visible) * np.random.randn(n_visible)
         mvec_val = 0.01 * np.random.randn(n_visible)
-        whidvis_vals = np.sqrt(2 / n_hidden) * np.random.randn(depth, n_visible)
-        whidhid_vals = np.sqrt(2 / n_hidden) * np.random.randn(depth, n_hidden)
+        whidvis_vals = np.sqrt(2 / n_hidden) * np.random.randn(n_layers, n_visible)
+        whidhid_vals = np.sqrt(2 / n_hidden) * np.random.randn(n_layers, n_hidden)
         bvis_val = np.array(-scale)
         bhid_val = np.array(0.)
 
@@ -1039,8 +1083,8 @@ class InvariantDeepRNN(DeepRNN):
 
         # get operators:
         mvec_op = rep_vec(mvec, n_visible, n_hidden_readout)[0]
-        whidvis_op = rep_vec(whidvis, n_visible, n_hidden)  # shape (depth, n_vis + n_hid - 1)
-        whidhid_op = rep_vec(whidhid, n_hidden, n_hidden_readout)  # shape (depth, n_hid + n_hid_ro - 1)
+        whidvis_op = rep_vec(whidvis, n_visible, n_hidden)  # shape (n_layers, n_vis + n_hid - 1)
+        whidhid_op = rep_vec(whidhid, n_hidden, n_hidden_readout)  # shape (n_layers, n_hid + n_hid_ro - 1)
 
         readout_operators = [mvec_op, whidvis_op, whidhid_op, bvis, bhid]
 

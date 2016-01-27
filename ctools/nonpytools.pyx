@@ -160,8 +160,7 @@ def crosscorrelation(np.ndarray[dtype_t, ndim=2] data, uint_t ran):
     $$
     for $ -ran <= t <= ran$ and where $L=$ leftarr, $R=$ rightarr and $T=$ len(L) = len(R).
 
-    :param leftarr: numpy.float64
-    :param rightarr: numpy.float64
+    :param data: numpy.float64
     :param ran: int
     :return:
     """

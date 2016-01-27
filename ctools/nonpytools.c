@@ -3,7 +3,13 @@
 /* BEGIN: Cython Metadata
 {
     "distutils": {
-        "depends": []
+        "depends": [
+            "/home/heka/Enthought/Canopy_64bit/User/lib/python2.7/site-packages/numpy/core/include/numpy/arrayobject.h", 
+            "/home/heka/Enthought/Canopy_64bit/User/lib/python2.7/site-packages/numpy/core/include/numpy/ufuncobject.h"
+        ], 
+        "include_dirs": [
+            "/home/heka/Enthought/Canopy_64bit/User/lib/python2.7/site-packages/numpy/core/include"
+        ]
     }
 }
 END: Cython Metadata */

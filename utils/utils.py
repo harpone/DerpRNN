@@ -435,6 +435,17 @@ def tip_init(depth, num_columns, sparsity=.15, spectral_radius=1.1, name=None):
     return arr
 
 
+def tip_init_constrained(depth, n_hidden, rec_spec_rad, name=None):
+    """
+
+    :param depth:
+    :param n_hidden:
+    :param rec_spec_rad:
+    :param name:
+    :return:
+    """
+
+
 def get_random_sparse_tip_vec(size, sparsity, spectral_radius):
 
     # create random sparse vec:
@@ -452,3 +463,169 @@ def get_random_sparse_tip_vec(size, sparsity, spectral_radius):
     vec *= spectral_radius / max_eigval
 
     return vec
+
+
+def get_sru_tip_params(n_hidden, sparsity, rec_spec_rad, input_rad, depth, constrain_eigvals):
+    """
+
+    :param n_hidden:
+    :param sparsity:
+    :param rec_spec_rad:
+    :param input_rad:
+    :param depth:
+    :param constrain_eigvals:
+    :return:
+    """
+    # TODO: input matrices are back to nonorthogonal
+    if constrain_eigvals:
+        # these are actually now just the eigenvalue phases!!
+        assert n_hidden % 2 == 0, 'Number of hidden units should be even...'
+        rnd_phases = np.random.rand(depth, int(n_hidden / 2) - 1) * 2 * np.pi
+        uhs = theano.shared(rnd_phases.astype(theano.config.floatX), name='uhs')  # rec weight
+        #whs = theano.shared(rnd_phases.astype(theano.config.floatX), name='uhs')  # input weight
+    else:
+        uhs = tip_init(depth, n_hidden, sparsity, rec_spec_rad, name='uhs')
+
+    whs = tip_init(depth, n_hidden, sparsity, input_rad, name='whs')
+
+    # rec_spec_rad as parameter:
+    rhos_val = rec_spec_rad * np.ones((depth, ))  # NOTE THE SHAPE!!
+    rhos = theano.shared(rhos_val.astype(theano.config.floatX),  # NOT broadcastable now!!!
+                         name='rhos')
+                         #broadcastable=(False, True))
+    # input_rad as parameter:
+    #sigma = theano.shared(np.array(input_rad).astype(theano.config.floatX), name='sigma')
+
+    rnn_params = [rhos, uhs, whs]
+
+    if constrain_eigvals:
+        uhs_op = get_uhs_operator(uhs, depth, n_hidden, rhos)
+        #whs_op = get_uhs_operator(whs, depth, n_hidden, sigma)
+    else:
+        uhs_op = rep_vec(uhs, n_hidden, n_hidden)  # shape (depth, 2 * n_hidden - 1)
+
+    whs_op = rep_vec(whs, n_hidden, n_hidden)
+
+    rnn_operators = [T.concatenate((uhs_op,
+                                    whs_op), axis=1)]
+
+    return rnn_params, rnn_operators
+
+
+def get_gru_tip_params(n_hidden, sparsity, rec_spec_rad, input_rad, depth, constrain_eigvals):
+    """
+
+    :param n_hidden:
+    :param sparsity:
+    :param rec_spec_rad:
+    :param input_rad:
+    :param depth:
+    :param constrain_eigvals:
+    :return:
+    """
+
+    if constrain_eigvals:
+        # these are actually now just the eigenvalue phases!!
+        assert n_hidden % 2 == 0, 'Number of hidden units should be even...'
+        rnd_phases = np.random.rand(depth, int(n_hidden / 2) - 1) * 2 * np.pi
+        uhs = theano.shared(rnd_phases.astype(theano.config.floatX), name='uhs')
+    else:
+        uhs = tip_init(depth, n_hidden, sparsity, rec_spec_rad, name='uhs')
+
+    uzs = tip_init(depth, n_hidden, sparsity, rec_spec_rad, name='uzs')
+    urs = tip_init(depth, n_hidden, sparsity, rec_spec_rad, name='urs')
+    # TODO: how does this affect things?? (both prev layer outs and prev time
+    # should have equal contribution in z_t, r_t)
+    #uzs = tip_input_init(depth, n_hidden, input_scale, name='uzs')
+    #urs = tip_input_init(depth, n_hidden, input_scale, name='urs')
+
+    w0s = tip_input_init(depth, n_hidden, input_rad, name='w0s')
+    wzs = tip_input_init(depth, n_hidden, input_rad, name='wzs')
+    wrs = tip_input_init(depth, n_hidden, input_rad, name='wrs')
+    bzs_val = np.linspace(3., -3., depth, dtype=theano.config.floatX)
+    bzs = theano.shared(bzs_val[:, None], name='bzs')  # shape (depth, 1)
+    brs_val = np.random.randn(depth).astype(theano.config.floatX)
+    brs = theano.shared(brs_val[:, None], name='brs')  # shape (depth, 1)
+
+    # rec_spec_rad as parameter:
+    rho = theano.shared(np.array(rec_spec_rad).astype(theano.config.floatX), name='rho')
+
+    rnn_params = [rho, uhs, uzs, urs, w0s, wzs, wrs, bzs, brs]
+
+    # get operators:
+    # TODO: won't work!! Theano can't take grad through complex nodes...
+    # if self.constrain_eigvals:
+    #     exp_phases = T.exp(1j * uhs)
+    #     neg_exp_phases = T.exp(-1j * uhs[:, ::-1])
+    #     ones_ = T.ones((depth, 1), dtype=theano.config.floatX)
+    #     #TODO: note that there are now +-rho eigvals, sign quite arbitrarily selected...
+    #     eigvals = rec_spec_rad * T.concatenate((ones_, exp_phases, -ones_, neg_exp_phases))
+    #     a_k = T.real(fft(eigvals, n_hidden, 1))  # the uhs in old notation, i.e. Circ vector
+    #     # TODO: fft returns complex128 dtype, T.real casts to float64...
+    #     # Need to check that the casting is optimized!!
+    #     a_k = a_k.astype(theano.config.floatX)
+    #     uhs_op = rep_vec(a_k, n_hidden, n_hidden)  # shape (depth, 2 * n_hidden - 1)
+    if constrain_eigvals:
+        uhs_op = get_uhs_operator(uhs, depth, n_hidden, rho)
+    else:
+        uhs_op = rep_vec(uhs, n_hidden, n_hidden)  # shape (depth, 2 * n_hidden - 1)
+
+    uzs_op = rep_vec(uzs, n_hidden, n_hidden)
+    urs_op = rep_vec(urs, n_hidden, n_hidden)
+    w0s_op = rep_vec(w0s, n_hidden, n_hidden)
+    wzs_op = rep_vec(wzs, n_hidden, n_hidden)
+    wrs_op = rep_vec(wrs, n_hidden, n_hidden)
+
+    rnn_operators = [T.concatenate((uhs_op,
+                                   uzs_op,
+                                   urs_op,
+                                   w0s_op,
+                                   wzs_op,
+                                   wrs_op,
+                                   bzs,
+                                   brs), axis=1)]
+
+    return rnn_params, rnn_operators
+
+
+def get_uhs_operator(uhs, depth, n_hidden, rhos):
+    """
+
+    :param uhs:
+    :param depth:
+    :param n_hidden:
+    :param rhos: can be shared variable or constant of shape (depth, )!!
+    :return:
+    """
+    # Will use a Fourier matrix (will be O(n^2)...)
+    # Doesn't seem to slow things down much though!
+    exp_phases = [T.cos(uhs), T.sin(uhs)]
+    neg_exp_phases = [T.cos(uhs[:, ::-1]), -T.sin(uhs[:, ::-1])]
+    ones_ = [T.ones((depth, 1), dtype=theano.config.floatX),
+             T.zeros((depth, 1), dtype=theano.config.floatX)]
+
+    rhos_reshaped = T.reshape(rhos, (depth, 1), ndim=2)
+    rhos_reshaped = T.addbroadcast(rhos_reshaped, 1)
+
+    eigvals_re = rhos_reshaped * T.concatenate((ones_[0],
+                                               exp_phases[0],
+                                               -ones_[0],
+                                               neg_exp_phases[0]), axis=1)
+    eigvals_im = rhos_reshaped * T.concatenate((ones_[1],
+                                               exp_phases[1],
+                                               -ones_[1],
+                                               neg_exp_phases[1]), axis=1)
+    phase_array = -2 * np.pi * np.outer(np.arange(n_hidden), np.arange(n_hidden)) / n_hidden
+    f_array_re_val = np.cos(phase_array) / n_hidden
+    f_array_im_val = np.sin(phase_array) / n_hidden
+    f_array_re = theano.shared(f_array_re_val.astype(theano.config.floatX), name='f_arr_re')
+    f_array_im = theano.shared(f_array_im_val.astype(theano.config.floatX), name='f_arr_im')
+
+    a_k = T.dot(eigvals_re, f_array_re) + T.dot(eigvals_im, f_array_im)
+    uhs_op = rep_vec(a_k, n_hidden, n_hidden)  # shape (depth, 2 * n_hidden - 1)
+
+    return uhs_op
+
+
+
+
