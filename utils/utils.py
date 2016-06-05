@@ -1,9 +1,6 @@
 from __future__ import division, print_function
-# University of Montreal (2012)
-# RNN-RBM deep learning tutorial
-# More information at http://deeplearning.net/tutorial/rnnrbm.html
-#
-# Modified by Heikki Arponen (2015)
+
+# Heikki Arponen (2015)
 # heikki@quantmechanics.com
 
 
