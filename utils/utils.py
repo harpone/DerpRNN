@@ -1,5 +1,4 @@
 from __future__ import division, print_function
-# Author: Nicolas Boulanger-Lewandowski
 # University of Montreal (2012)
 # RNN-RBM deep learning tutorial
 # More information at http://deeplearning.net/tutorial/rnnrbm.html
